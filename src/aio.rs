@@ -306,6 +306,11 @@ where
     async fn read_response(&mut self) -> RedisResult<Value> {
         crate::parser::parse_redis_value_async(&mut self.decoder, &mut self.con).await
     }
+    /// Fetches a single response from the connection.  This is useful
+    /// if used in combination with `send_packed_command`.
+    pub async fn recv_response(&mut self) -> RedisResult<Value> {
+        self.read_response().await
+    }
 
     /// Brings [`Connection`] out of `PubSub` mode.
     ///
@@ -323,6 +328,18 @@ where
         }
 
         res
+    }
+
+    /// Sends an already encoded (packed) command into the TCP socket and
+    /// does not read a response.  This is useful for commands like
+    /// `MONITOR` which yield multiple items.  This needs to be used with
+    /// care because it changes the state of the connection.
+    pub async fn send_packed_command(&mut self, cmd: &[u8]) -> RedisResult<()> {
+        self.con
+            .write_all(cmd)
+            .await
+            .map(|_| ())
+            .map_err(RedisError::from)
     }
 
     /// Get the inner connection out of a PubSub
@@ -524,6 +541,8 @@ pub trait ConnectionLike {
     /// also might be incorrect if the connection like object is not
     /// actually connected.
     fn get_db(&self) -> i64;
+
+    fn check_connection<'a>(&'a mut self) -> futures_util::future::BoxFuture<'a, bool>;
 }
 
 impl<C> ConnectionLike for Connection<C>
@@ -595,6 +614,15 @@ where
 
     fn get_db(&self) -> i64 {
         self.db
+    }
+
+    fn check_connection<'a>(&'a mut self) -> futures_util::future::BoxFuture<'a, bool> {
+        Box::pin(async {
+            self.req_packed_command(&cmd("PING"))
+                .await
+                .and_then(|v| from_redis_value::<String>(&v))
+                .is_ok()
+        })
     }
 }
 
@@ -939,6 +967,15 @@ impl ConnectionLike for MultiplexedConnection {
     fn get_db(&self) -> i64 {
         self.db
     }
+
+    fn check_connection<'a>(&'a mut self) -> futures_util::future::BoxFuture<'a, bool> {
+        Box::pin(async {
+            self.req_packed_command(&cmd("PING"))
+                .await
+                .and_then(|v| from_redis_value::<String>(&v))
+                .is_ok()
+        })
+    }
 }
 
 #[cfg(feature = "connection-manager")]
@@ -1112,6 +1149,15 @@ mod connection_manager {
 
         fn get_db(&self) -> i64 {
             self.client.connection_info().redis.db
+        }
+
+        fn check_connection<'a>(&'a mut self) -> futures_util::future::BoxFuture<'a, bool> {
+            Box::pin(async {
+                self.req_packed_command(&cmd("PING"))
+                    .await
+                    .and_then(|v| from_redis_value::<String>(&v))
+                    .is_ok()
+            })
         }
     }
 }

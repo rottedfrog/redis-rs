@@ -613,11 +613,15 @@ impl<C> ConnectionLike for ClusterConnection<C>
 where
     C: Unpin + RedisRuntime + AsyncRead + AsyncWrite + Send,
 {
-    fn req_packed_command<'a>(&'a mut self, cmd: &'a Cmd) -> RedisFuture<'a, Value> {
+    fn req_packed_command<'a>(&'a mut self, cmd: &Cmd) -> RedisFuture<'a, Value> {
+        let cmd = cmd.clone();
         Box::pin(async move {
             let value = parse_redis_value(&cmd.get_packed_command())?;
-            let func = |conn: &mut Connection<C>| conn.req_packed_command(cmd);
-            self.request(&value, func).await
+
+            self.request(&value, |conn: &mut Connection<C>| {
+                conn.req_packed_command(&cmd)
+            })
+            .await
         })
     }
 
@@ -626,14 +630,17 @@ where
     /// pipelining.
     fn req_packed_commands<'a>(
         &'a mut self,
-        cmd: &'a crate::Pipeline,
+        cmd: &crate::Pipeline,
         offset: usize,
         count: usize,
     ) -> RedisFuture<'a, Vec<Value>> {
+        let cmd = cmd.clone();
         Box::pin(async move {
             let value = parse_redis_value(&cmd.get_packed_pipeline())?;
-            let func = |conn: &mut Connection<C>| conn.req_packed_commands(cmd, offset, count);
-            self.request(&value, func).await
+            self.request(&value, |conn: &mut Connection<C>| {
+                conn.req_packed_commands(&cmd, offset, count)
+            })
+            .await
         })
     }
 

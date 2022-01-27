@@ -52,7 +52,8 @@ pub mod tokio;
 
 /// Represents the ability of connecting via TCP or via Unix socket
 #[async_trait]
-pub(crate) trait RedisRuntime: AsyncStream + Send + Sync + Sized + 'static {
+#[doc(hidden)]
+pub trait RedisRuntime: AsyncStream + Send + Sync + Sized + 'static {
     /// Performs a TCP connection
     async fn connect_tcp(socket_addr: SocketAddr) -> RedisResult<Self>;
 
@@ -524,14 +525,14 @@ fn get_socket_addrs(host: &str, port: u16) -> RedisResult<SocketAddr> {
 pub trait ConnectionLike {
     /// Sends an already encoded (packed) command into the TCP socket and
     /// reads the single response from it.
-    fn req_packed_command<'a>(&'a mut self, cmd: &'a Cmd) -> RedisFuture<'a, Value>;
+    fn req_packed_command<'a>(&'a mut self, cmd: &Cmd) -> RedisFuture<'a, Value>;
 
     /// Sends multiple already encoded (packed) command into the TCP socket
     /// and reads `count` responses from it.  This is used to implement
     /// pipelining.
     fn req_packed_commands<'a>(
         &'a mut self,
-        cmd: &'a crate::Pipeline,
+        cmd: &crate::Pipeline,
         offset: usize,
         count: usize,
     ) -> RedisFuture<'a, Vec<Value>>;
@@ -542,6 +543,7 @@ pub trait ConnectionLike {
     /// actually connected.
     fn get_db(&self) -> i64;
 
+    /// Check that all connections it has are available (`PING` internally).
     fn check_connection<'a>(&'a mut self) -> futures_util::future::BoxFuture<'a, bool>;
 }
 
@@ -549,13 +551,13 @@ impl<C> ConnectionLike for Connection<C>
 where
     C: Unpin + AsyncRead + AsyncWrite + Send,
 {
-    fn req_packed_command<'a>(&'a mut self, cmd: &'a Cmd) -> RedisFuture<'a, Value> {
+    fn req_packed_command<'a>(&'a mut self, cmd: &Cmd) -> RedisFuture<'a, Value> {
+        self.buf.clear();
+        cmd.write_packed_command(&mut self.buf);
         (async move {
             if self.pubsub {
                 self.exit_pubsub().await?;
             }
-            self.buf.clear();
-            cmd.write_packed_command(&mut self.buf);
             self.con.write_all(&self.buf).await?;
             self.read_response().await
         })
@@ -564,17 +566,17 @@ where
 
     fn req_packed_commands<'a>(
         &'a mut self,
-        cmd: &'a crate::Pipeline,
+        cmd: &crate::Pipeline,
         offset: usize,
         count: usize,
     ) -> RedisFuture<'a, Vec<Value>> {
+        self.buf.clear();
+        cmd.write_packed_pipeline(&mut self.buf);
         (async move {
             if self.pubsub {
                 self.exit_pubsub().await?;
             }
 
-            self.buf.clear();
-            cmd.write_packed_pipeline(&mut self.buf);
             self.con.write_all(&self.buf).await?;
 
             let mut first_err = None;
@@ -617,7 +619,7 @@ where
     }
 
     fn check_connection<'a>(&'a mut self) -> futures_util::future::BoxFuture<'a, bool> {
-        Box::pin(async {
+        Box::pin(async move {
             self.req_packed_command(&cmd("PING"))
                 .await
                 .and_then(|v| from_redis_value::<String>(&v))
@@ -925,17 +927,12 @@ impl MultiplexedConnection {
 }
 
 impl ConnectionLike for MultiplexedConnection {
-    fn req_packed_command<'a>(&'a mut self, cmd: &'a Cmd) -> RedisFuture<'a, Value> {
+    fn req_packed_command<'a>(&'a mut self, cmd: &Cmd) -> RedisFuture<'a, Value> {
+        let packed_cmd = cmd.get_packed_command();
         (async move {
-            let value = self
-                .pipeline
-                .send(cmd.get_packed_command())
-                .await
-                .map_err(|err| {
-                    err.unwrap_or_else(|| {
-                        RedisError::from(io::Error::from(io::ErrorKind::BrokenPipe))
-                    })
-                })?;
+            let value = self.pipeline.send(packed_cmd).await.map_err(|err| {
+                err.unwrap_or_else(|| RedisError::from(io::Error::from(io::ErrorKind::BrokenPipe)))
+            })?;
             Ok(value)
         })
         .boxed()
@@ -943,14 +940,15 @@ impl ConnectionLike for MultiplexedConnection {
 
     fn req_packed_commands<'a>(
         &'a mut self,
-        cmd: &'a crate::Pipeline,
+        cmd: &crate::Pipeline,
         offset: usize,
         count: usize,
     ) -> RedisFuture<'a, Vec<Value>> {
+        let packed_cmd = cmd.get_packed_pipeline();
         (async move {
             let mut value = self
                 .pipeline
-                .send_recv_multiple(cmd.get_packed_pipeline(), offset + count)
+                .send_recv_multiple(packed_cmd, offset + count)
                 .await
                 .map_err(|err| {
                     err.unwrap_or_else(|| {
@@ -969,7 +967,7 @@ impl ConnectionLike for MultiplexedConnection {
     }
 
     fn check_connection<'a>(&'a mut self) -> futures_util::future::BoxFuture<'a, bool> {
-        Box::pin(async {
+        Box::pin(async move {
             self.req_packed_command(&cmd("PING"))
                 .await
                 .and_then(|v| from_redis_value::<String>(&v))
@@ -1108,7 +1106,8 @@ mod connection_manager {
     }
 
     impl ConnectionLike for ConnectionManager {
-        fn req_packed_command<'a>(&'a mut self, cmd: &'a Cmd) -> RedisFuture<'a, Value> {
+        fn req_packed_command<'a>(&'a mut self, cmd: &Cmd) -> RedisFuture<'a, Value> {
+            let cmd = cmd.clone();
             (async move {
                 // Clone connection to avoid having to lock the ArcSwap in write mode
                 let guard = self.connection.load();
@@ -1117,7 +1116,7 @@ mod connection_manager {
                     .await
                     .map_err(|e| e.clone_mostly("Reconnecting failed"));
                 reconnect_if_io_error!(self, connection_result, guard);
-                let result = connection_result?.req_packed_command(cmd).await;
+                let result = connection_result?.req_packed_command(&cmd).await;
                 reconnect_if_dropped!(self, &result, guard);
                 result
             })
@@ -1126,10 +1125,11 @@ mod connection_manager {
 
         fn req_packed_commands<'a>(
             &'a mut self,
-            cmd: &'a crate::Pipeline,
+            cmd: &crate::Pipeline,
             offset: usize,
             count: usize,
         ) -> RedisFuture<'a, Vec<Value>> {
+            let cmd = cmd.clone();
             (async move {
                 // Clone shared connection future to avoid having to lock the ArcSwap in write mode
                 let guard = self.connection.load();
@@ -1139,7 +1139,7 @@ mod connection_manager {
                     .map_err(|e| e.clone_mostly("Reconnecting failed"));
                 reconnect_if_io_error!(self, connection_result, guard);
                 let result = connection_result?
-                    .req_packed_commands(cmd, offset, count)
+                    .req_packed_commands(&cmd, offset, count)
                     .await;
                 reconnect_if_dropped!(self, &result, guard);
                 result
@@ -1152,7 +1152,7 @@ mod connection_manager {
         }
 
         fn check_connection<'a>(&'a mut self) -> futures_util::future::BoxFuture<'a, bool> {
-            Box::pin(async {
+            Box::pin(async move {
                 self.req_packed_command(&cmd("PING"))
                     .await
                     .and_then(|v| from_redis_value::<String>(&v))

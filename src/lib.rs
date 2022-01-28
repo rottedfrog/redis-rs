@@ -421,6 +421,10 @@ pub mod geo;
 #[cfg_attr(docsrs, doc(cfg(feature = "cluster")))]
 pub mod cluster;
 
+#[cfg(feature = "aio")]
+#[cfg_attr(docsrs, doc(cfg(feature = "aio")))]
+pub mod aio_cluster;
+
 #[cfg(feature = "cluster")]
 mod cluster_client;
 

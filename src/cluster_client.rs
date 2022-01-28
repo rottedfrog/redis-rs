@@ -85,6 +85,28 @@ impl ClusterClient {
         )
     }
 
+    /// Asychronously opens connections to Redis Cluster nodes and returns a
+    /// [ClusterConnection](ClusterConnection).
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if there is a failure to open connections or to create slots.
+    #[cfg(feature = "aio")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "aio")))]
+    pub async fn get_connection_async<C>(
+        &self,
+    ) -> RedisResult<super::aio_cluster::ClusterConnection<C>>
+    where
+        C: Unpin + crate::aio::RedisRuntime + futures::AsyncRead + futures::AsyncWrite + Send,
+    {
+        super::aio_cluster::ClusterConnection::new(
+            self.initial_nodes.clone(),
+            self.readonly,
+            self.password.clone(),
+        )
+        .await
+    }
+
     fn build(builder: ClusterClientBuilder) -> RedisResult<ClusterClient> {
         let initial_nodes = builder.initial_nodes?;
         let mut nodes = Vec::with_capacity(initial_nodes.len());

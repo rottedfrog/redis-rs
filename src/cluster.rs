@@ -59,14 +59,6 @@ use crate::cluster_pipeline::UNROUTABLE_ERROR;
 pub use crate::cluster_pipeline::{cluster_pipe, ClusterPipeline};
 use crate::cluster_routing::{Routable, RoutingInfo, Slot, SLOT_SIZE};
 
-#[cfg(feature = "aio")]
-#[cfg_attr(docsrs, doc(cfg(feature = "aio")))]
-pub mod aio_cluster;
-
-#[cfg(feature = "aio")]
-#[cfg_attr(docsrs, doc(cfg(feature = "aio")))]
-mod connection_map;
-
 type SlotMap = BTreeMap<u16, String>;
 
 /// This is a connection of Redis cluster.

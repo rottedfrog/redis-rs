@@ -129,6 +129,56 @@ impl ClusterPipeline {
         )
     }
 
+    /// Executes the pipeline asynchronously and fetches the return values:
+    ///
+    /// ```rust,no_run
+    /// # let nodes = vec!["redis://127.0.0.1:6379/"];
+    /// # let client = redis::cluster::ClusterClient::open(nodes).unwrap();
+    /// # let mut con = client.get_connection_async().await.unwrap();
+    /// let mut pipe = redis::cluster::cluster_pipe();
+    /// let (k1, k2) : (i32, i32) = pipe
+    ///     .cmd("SET").arg("key_1").arg(42).ignore()
+    ///     .cmd("SET").arg("key_2").arg(43).ignore()
+    ///     .cmd("GET").arg("key_1")
+    ///     .cmd("GET").arg("key_2").query_async(&mut con).await.unwrap();
+    /// ```
+    #[cfg(feature = "aio")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "aio")))]
+    #[inline]
+    pub async fn query_async<T: FromRedisValue, C>(
+        &self,
+        con: &mut super::aio_cluster::ClusterConnection<C>,
+    ) -> RedisResult<T>
+    where
+        C: Unpin + crate::aio::RedisRuntime + futures::AsyncRead + futures::AsyncWrite + Send,
+    {
+        for cmd in &self.commands {
+            let cmd_name = std::str::from_utf8(cmd.arg_idx(0).unwrap_or(b""))
+                .unwrap_or("")
+                .trim()
+                .to_ascii_uppercase();
+
+            if is_illegal_cmd(&cmd_name) {
+                fail!((
+                    UNROUTABLE_ERROR.0,
+                    UNROUTABLE_ERROR.1,
+                    format!(
+                        "Command '{}' can't be executed in a cluster pipeline.",
+                        cmd_name
+                    )
+                ))
+            }
+        }
+
+        from_redis_value(
+            &(if self.commands.is_empty() {
+                Value::Bulk(vec![])
+            } else {
+                self.make_pipeline_results(con.execute_pipeline(self).await?)
+            }),
+        )
+    }
+
     /// This is a shortcut to `query()` that does not return a value and
     /// will fail the task if the query of the pipeline fails.
     ///
@@ -144,6 +194,28 @@ impl ClusterPipeline {
     #[inline]
     pub fn execute(&self, con: &mut ClusterConnection) {
         self.query::<()>(con).unwrap();
+    }
+
+    /// This is a shortcut to `query_async()` that does not return a value and
+    /// will fail the task if the query of the pipeline fails.
+    ///
+    /// This is equivalent to a call to query_async like this:
+    ///
+    /// ```rust,no_run
+    /// # let nodes = vec!["redis://127.0.0.1:6379/"];
+    /// # let client = redis::cluster::ClusterClient::open(nodes).unwrap();
+    /// # let mut con = client.get_connection_async().await.unwrap();
+    /// let mut pipe = redis::cluster::cluster_pipe();
+    /// let _ : () = pipe.cmd("SET").arg("key_1").arg(42).ignore().query_async(&mut con).await.unwrap();
+    /// ```
+    #[cfg(feature = "aio")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "aio")))]
+    #[inline]
+    pub async fn execute_async<C>(&self, con: &mut super::aio_cluster::ClusterConnection<C>)
+    where
+        C: Unpin + crate::aio::RedisRuntime + futures::AsyncRead + futures::AsyncWrite + Send,
+    {
+        self.query_async::<(), C>(con).await.unwrap();
     }
 }
 

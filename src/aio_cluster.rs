@@ -38,13 +38,13 @@
 //!     .expire(key, 60).ignore()
 //!     .query(&mut connection).unwrap();
 //! ```
-use futures::{AsyncRead, AsyncWrite};
 use rand::seq::IteratorRandom;
 use rand::{seq::SliceRandom, thread_rng, Rng};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter::Iterator;
 use std::thread;
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::Mutex;
 
 use crate::aio::{connect, Connection, ConnectionLike, RedisRuntime};
@@ -703,7 +703,7 @@ async fn get_slots<C>(
     tls_mode: Option<TlsMode>,
 ) -> RedisResult<Vec<Slot>>
 where
-    C: Unpin + RedisRuntime + AsyncRead + AsyncWrite + Send,
+    C: Unpin + AsyncRead + AsyncWrite + Send,
 {
     let mut cmd = Cmd::new();
     cmd.arg("CLUSTER").arg("SLOTS");

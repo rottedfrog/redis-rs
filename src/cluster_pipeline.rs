@@ -134,13 +134,15 @@ impl ClusterPipeline {
     /// ```rust,no_run
     /// # let nodes = vec!["redis://127.0.0.1:6379/"];
     /// # let client = redis::cluster::ClusterClient::open(nodes).unwrap();
-    /// # let mut con = client.get_connection_async().await.unwrap();
+    /// # let _ = async move {
+    /// # let mut con = client.get_tokio_connection().await.unwrap();
     /// let mut pipe = redis::cluster::cluster_pipe();
     /// let (k1, k2) : (i32, i32) = pipe
     ///     .cmd("SET").arg("key_1").arg(42).ignore()
     ///     .cmd("SET").arg("key_2").arg(43).ignore()
     ///     .cmd("GET").arg("key_1")
     ///     .cmd("GET").arg("key_2").query_async(&mut con).await.unwrap();
+    /// # };
     /// ```
     #[cfg(feature = "aio")]
     #[cfg_attr(docsrs, doc(cfg(feature = "aio")))]
@@ -150,7 +152,7 @@ impl ClusterPipeline {
         con: &mut super::aio_cluster::ClusterConnection<C>,
     ) -> RedisResult<T>
     where
-        C: Unpin + crate::aio::RedisRuntime + futures::AsyncRead + futures::AsyncWrite + Send,
+        C: Unpin + crate::aio::RedisRuntime + tokio::io::AsyncRead + tokio::io::AsyncWrite + Send,
     {
         for cmd in &self.commands {
             let cmd_name = std::str::from_utf8(cmd.arg_idx(0).unwrap_or(b""))
@@ -204,16 +206,18 @@ impl ClusterPipeline {
     /// ```rust,no_run
     /// # let nodes = vec!["redis://127.0.0.1:6379/"];
     /// # let client = redis::cluster::ClusterClient::open(nodes).unwrap();
-    /// # let mut con = client.get_connection_async().await.unwrap();
+    /// # let _ = async move {
+    /// # let mut con = client.get_tokio_connection().await.unwrap();
     /// let mut pipe = redis::cluster::cluster_pipe();
     /// let _ : () = pipe.cmd("SET").arg("key_1").arg(42).ignore().query_async(&mut con).await.unwrap();
+    /// # };
     /// ```
     #[cfg(feature = "aio")]
     #[cfg_attr(docsrs, doc(cfg(feature = "aio")))]
     #[inline]
     pub async fn execute_async<C>(&self, con: &mut super::aio_cluster::ClusterConnection<C>)
     where
-        C: Unpin + crate::aio::RedisRuntime + futures::AsyncRead + futures::AsyncWrite + Send,
+        C: Unpin + crate::aio::RedisRuntime + tokio::io::AsyncRead + tokio::io::AsyncWrite + Send,
     {
         self.query_async::<(), C>(con).await.unwrap();
     }

@@ -24,7 +24,8 @@ use tokio_native_tls::TlsStream;
 #[cfg(unix)]
 use super::Path;
 
-pub(crate) enum Tokio {
+/// Represents a Tokio connectable.
+pub enum Tokio {
     /// Represents a Tokio TCP connection.
     Tcp(TcpStreamTokio),
     /// Represents a Tokio TLS encrypted TCP connection

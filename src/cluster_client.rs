@@ -85,21 +85,37 @@ impl ClusterClient {
         )
     }
 
-    /// Asychronously opens connections to Redis Cluster nodes and returns a
+    /// Asychronously opens connections to Redis Cluster nodes on a tokio runtime and returns a
     /// [ClusterConnection](ClusterConnection).
     ///
     /// # Errors
     ///
     /// An error is returned if there is a failure to open connections or to create slots.
-    #[cfg(feature = "aio")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "aio")))]
-    pub async fn get_connection_async<C>(
+    #[cfg(feature = "tokio-comp")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "tokio-comp")))]
+    pub async fn get_tokio_connection(
         &self,
-    ) -> RedisResult<super::aio_cluster::ClusterConnection<C>>
-    where
-        C: Unpin + crate::aio::RedisRuntime + futures::AsyncRead + futures::AsyncWrite + Send,
-    {
-        super::aio_cluster::ClusterConnection::new(
+    ) -> RedisResult<super::aio_cluster::ClusterConnection<crate::aio::tokio::Tokio>> {
+        super::aio_cluster::ClusterConnection::<crate::aio::tokio::Tokio>::new(
+            self.initial_nodes.clone(),
+            self.readonly,
+            self.password.clone(),
+        )
+        .await
+    }
+
+    /// Asychronously opens connections to Redis Cluster nodes on an async-std runtime and returns a
+    /// [ClusterConnection](ClusterConnection).
+    ///
+    /// # Errors
+    ///
+    /// An error is returned if there is a failure to open connections or to create slots.
+    #[cfg(feature = "async-std-comp")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "async-std-comp")))]
+    pub async fn get_async_std_connection(
+        &self,
+    ) -> RedisResult<super::aio_cluster::ClusterConnection<crate::aio::async_std::AsyncStd>> {
+        super::aio_cluster::ClusterConnection::<crate::aio::async_std::AsyncStd>::new(
             self.initial_nodes.clone(),
             self.readonly,
             self.password.clone(),
